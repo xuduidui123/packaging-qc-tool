@@ -1,0 +1,12 @@
+# 包装设计稿与实物打样核对系统 — 依赖
+# 说明：使用 CPU 版 torch 以适配 Streamlit Community Cloud（无 GPU）
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+streamlit>=1.28.0
+numpy>=1.24.0
+opencv-python-headless>=4.8.0
+scikit-image>=0.21.0
+Pillow>=10.0.0
+easyocr>=1.7.0
+torch>=2.0.0
+torchvision>=0.15.0
