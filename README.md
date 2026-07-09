@@ -10,7 +10,6 @@
 2. 打开 https://share.streamlit.io ，用 GitHub 登录。
 3. 选择本仓库，主文件填 `app.py`，点击 Deploy。
 
-> 首次启动会下载 OCR 模型（约 100MB），需要等待几分钟。
 
 ## 本地运行
 
