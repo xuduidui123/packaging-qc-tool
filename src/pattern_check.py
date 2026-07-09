@@ -500,10 +500,17 @@ class PatternChecker:
         #    背景在两图中一致、差异≈0 不会造成误报，所以只需圈住包装本体即可。
         package_mask = self.extract_package_mask(design)
         content_mask = self.extract_content_mask(design)  # 仅用于返回/可视化参考
-        if package_mask is not None:
+        # 覆盖率过低说明 package_mask 分割失败（如整幅低对比的包装稿被误分割），
+        # 此时回退为整幅画面——包装稿通常铺满画面，背景一致不会造成误报，
+        # 但若继续只用那一小块会漏掉画面其他位置的真实差异（如多出的色块）。
+        if package_mask is not None and float(np.mean(package_mask > 0)) >= 0.40:
             detection_mask = package_mask.copy()
         else:
+            # 整幅画面，去掉极窄边缘
             detection_mask = np.ones((h, w), dtype=np.uint8) * 255
+            m = max(2, int(0.01 * max(h, w)))
+            detection_mask[:m, :] = 0; detection_mask[-m:, :] = 0
+            detection_mask[:, :m] = 0; detection_mask[:, -m:] = 0
 
         # 1b. 排除对齐照片的黑色边框区域（warpPerspective 透视变换后
         #     照片外的区域会被填成黑色，若不排除会与设计稿产生巨大假差异）
