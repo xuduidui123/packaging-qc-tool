@@ -7,8 +7,15 @@ import os
 import sys
 import numpy as np
 import cv2
-from PIL import Image
+from PIL import Image, ImageOps
 import streamlit as st
+
+# 放宽 PIL 的解压炸弹限制（我们会主动缩小大图），避免大照片直接报错
+Image.MAX_IMAGE_PIXELS = None
+
+# 加载时统一缩小到的最大边长（像素）。手机照片常达数千万像素，
+# 直接处理会在云端有限内存下溢出/崩溃；缩小后既省内存又加速，精度足够。
+MAX_LOAD_DIM = 2400
 
 # 添加src到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
@@ -28,11 +35,25 @@ st.set_page_config(
 
 
 def load_image(uploaded_file) -> np.ndarray:
-    """加载上传的图像为numpy数组 (RGB)"""
+    """加载上传的图像为numpy数组 (RGB)，并对超大图自动缩小、按EXIF校正方向。"""
     image = Image.open(uploaded_file)
-    # 转为RGB
+    # JPEG 可在解码阶段就近似缩小，显著降低大图的内存占用
+    try:
+        image.draft("RGB", (MAX_LOAD_DIM, MAX_LOAD_DIM))
+    except Exception:
+        pass
+    # 依据 EXIF 方向自动旋正（手机照片常带旋转信息）
+    try:
+        image = ImageOps.exif_transpose(image)
+    except Exception:
+        pass
     if image.mode != "RGB":
         image = image.convert("RGB")
+    # 超大图缩小到最大边长以内，控制内存与耗时
+    w, h = image.size
+    if max(w, h) > MAX_LOAD_DIM:
+        scale = MAX_LOAD_DIM / max(w, h)
+        image = image.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
     return np.array(image)
 
 
