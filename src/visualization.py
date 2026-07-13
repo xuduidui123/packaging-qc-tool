@@ -106,10 +106,15 @@ def create_pattern_report(pattern_result: Dict) -> str:
     """生成图案核对文字报告"""
     lines = []
     lines.append("=" * 50)
-    lines.append("🎨 图案核对报告")
+    lines.append("🎨 图像差异核对报告")
     lines.append("=" * 50)
-    lines.append(f"SSIM结构相似度: {pattern_result['ssim_score']:.2%}")
-    lines.append(f"平均像素差异:   {pattern_result['mean_pixel_diff']:.1f}")
+    # 兼容新旧两套指标：新流程用 match_rate/mean_delta_e，旧流程用 ssim/pixel
+    if "match_rate" in pattern_result:
+        lines.append(f"色差达标率:   {pattern_result['match_rate']:.2%}")
+        lines.append(f"平均感知色差: {pattern_result.get('mean_delta_e', 0):.1f}")
+    else:
+        lines.append(f"SSIM结构相似度: {pattern_result.get('ssim_score', 0):.2%}")
+        lines.append(f"平均像素差异:   {pattern_result.get('mean_pixel_diff', 0):.1f}")
     lines.append(f"差异区域数:     {len(pattern_result['regions'])}")
     lines.append("")
 
@@ -128,6 +133,17 @@ def create_pattern_report(pattern_result: Dict) -> str:
             lines.append(f"  区域{i}: 位置({x},{y}) 大小{w}x{h} 差异强度{r['avg_diff']:.1f}")
 
     return "\n".join(lines)
+
+
+def empty_text_result() -> Dict:
+    """OCR 关闭时的占位文字结果，让报告层无需改动即可跳过文字核对。"""
+    return {
+        "stats": {"total_design": 0, "total_photo": 0, "matched": 0,
+                  "mismatched": 0, "missing": 0, "extra": 0},
+        "matches": [],
+        "visualization": None,
+        "skipped": True,
+    }
 
 
 def create_full_report(design: np.ndarray, aligned_photo: np.ndarray,
