@@ -64,6 +64,81 @@ def load_image(uploaded_file) -> np.ndarray:
     return np.array(image)
 
 
+def _render_ai_review(data: dict, regions: list, base_img=None):
+    """渲染 AI 复核结果：总体结论横幅 + 「左图右卡箭头连线」批注视图（失败回退文字版）。"""
+    overall = str(data.get("overall", "review")).lower()
+    summary = data.get("summary", "")
+    label = {"pass": ("✅ AI 判定：通过", st.success),
+             "fail": ("❌ AI 判定：存在真实差异", st.error)}.get(
+        overall, ("🔎 AI 判定：建议人工复核", st.warning))
+    label[1](f"{label[0]}　{summary}")
+
+    # 优先渲染批注视图（图上问题点与右侧说明用箭头相连）
+    if base_img is not None:
+        try:
+            import review_render
+            import streamlit.components.v1 as components
+            svg = review_render.build_review_svg(base_img, regions, data)
+            height = review_render.estimate_height(base_img, regions, data)
+            st.caption("下图：算法候选框按 AI 判定着色（红=真缺陷 / 蓝=伪差异 / 橙虚线=AI 认为被漏掉），"
+                       "编号与右侧说明用连线一一对应。")
+            components.html(f'<div style="overflow:auto">{svg}</div>',
+                            height=height + 10, scrolling=True)
+            # 下载整图 PNG（服务端栅格化，便于存档 / 发工厂）
+            try:
+                png = review_render.svg_to_png(svg)
+                st.download_button("⬇️ 下载复核批注图 (PNG)", data=png,
+                                   file_name="AI复核批注.png", mime="image/png")
+            except Exception:
+                st.caption("（如需下载整图 PNG：请确保已安装 cairosvg 与中文字体，"
+                           "部署见 packages.txt 的 libcairo2 / fonts-noto-cjk）")
+            return
+        except Exception:
+            pass  # 回退到下面的纯文字版
+
+    _render_ai_review_text(data)
+
+
+def _render_ai_review_text(data: dict):
+    """纯文字版 AI 复核结果（批注视图不可用时的回退）。"""
+    verdict_map = {
+        "real_defect": ("真缺陷", "❌"),
+        "false_alarm": ("伪差异", "⚪"),
+        "uncertain": ("不确定", "❓"),
+    }
+    reg_verdicts = data.get("regions", [])
+    if reg_verdicts:
+        st.markdown("#### 逐区判定（编号对应差异高亮图上的数字）")
+        for rv in reg_verdicts:
+            rid = rv.get("id", "?")
+            v = str(rv.get("verdict", "uncertain"))
+            name, icon = verdict_map.get(v, ("不确定", "❓"))
+            conf = rv.get("confidence", None)
+            conf_s = f"（把握度 {float(conf):.0%}）" if isinstance(conf, (int, float)) and float(conf) > 0 else ""
+            desc = rv.get("description", "")
+            typ = rv.get("type", "")
+            line = f"{icon} **区域 {rid} · {name}** {conf_s}　{('['+typ+'] ') if typ else ''}{desc}"
+            if v == "real_defect":
+                st.error(line)
+            elif v == "false_alarm":
+                st.info(line)
+            else:
+                st.warning(line)
+
+    missed = data.get("missed", []) or []
+    st.markdown("#### AI 认为可能被漏掉的差异")
+    if missed:
+        for m in missed:
+            loc = m.get("location", "")
+            conf = m.get("confidence", None)
+            conf_s = f"（把握度 {float(conf):.0%}）" if isinstance(conf, (int, float)) and float(conf) > 0 else ""
+            st.warning(f"🔺 {m.get('description', '')}　{('· '+loc) if loc else ''}{conf_s}")
+    else:
+        st.caption("（AI 未指出额外漏检项）")
+
+    st.caption("说明：AI 复核为辅助判断，可能出错；最终以人工确认为准。")
+
+
 def main():
     st.title("📦 包装设计稿与实物打样核对系统")
     st.markdown("---")
@@ -121,6 +196,31 @@ def main():
             disabled=not enable_ocr,
             help="仅在开启 OCR 时生效。相似度≥此值视为完全匹配。",
         )
+
+        st.markdown("---")
+        with st.expander("🤖 AI 复核（可选 · 自带 API Key）", expanded=False):
+            st.caption("算法先跑，再让视觉大模型对每个候选差异做**语义判定**"
+                       "（真缺陷 / 伪差异），并指出疑似漏检。默认关闭。")
+            ai_enable = st.checkbox("启用 AI 复核", value=False, key="ai_enable")
+            from ai_review import provider_names, PROVIDERS
+            ai_provider = st.selectbox("服务商", provider_names(), disabled=not ai_enable,
+                                       help="OpenAI / Anthropic / Gemini / 智谱GLM / Kimi，"
+                                            "或选「自定义」接任意 OpenAI 兼容服务。")
+            _cfg = PROVIDERS[ai_provider]
+            if _cfg.get("note"):
+                st.caption(_cfg["note"])
+            # 模型与接口地址都可自由填写：换厂商时用 key 让默认值刷新
+            ai_model = st.text_input("模型（视觉/多模态）", value=_cfg["default_model"],
+                                     key=f"ai_model_{ai_provider}", disabled=not ai_enable,
+                                     placeholder="须为支持看图的多模态模型")
+            ai_base_url = st.text_input("接口地址 base_url", value=_cfg["default_base_url"],
+                                        key=f"ai_base_{ai_provider}", disabled=not ai_enable,
+                                        placeholder="https://...")
+            ai_key = st.text_input("API Key", value="", type="password",
+                                   placeholder=_cfg["key_hint"], disabled=not ai_enable,
+                                   help="仅本次会话内存中使用，不落盘、不记录。")
+            st.caption("⚠️ 密钥仅用于当次调用、刷新即清。公开部署时它会经过本服务器，"
+                       "请自行评估信任。费用由你的 Key 承担。务必选**支持看图**的多模态模型。")
 
         st.markdown("---")
         st.info("""
@@ -342,6 +442,35 @@ def main():
                 st.text(full_report["text_report"])
                 st.markdown("### 图案核对报告")
                 st.text(full_report["pattern_report"])
+
+            # Step 6: AI 复核（可选）
+            if ai_enable:
+                st.markdown("---")
+                st.subheader("🤖 AI 复核")
+                if not ai_key or not ai_key.strip():
+                    st.warning("已启用 AI 复核，但未填写 API Key。请在左侧「AI 复核」中填写后重试。")
+                else:
+                    with st.spinner("正在请求 AI 对候选差异做语义复核..."):
+                        from ai_review import review as ai_review_call
+                        ai_res = ai_review_call(
+                            design_img,
+                            pattern_result["visualizations"]["diff_highlight"],
+                            pattern_result["regions"],
+                            provider=ai_provider,
+                            api_key=ai_key,
+                            model=ai_model,
+                            base_url=(ai_base_url.strip() or None),
+                        )
+                    if not ai_res["ok"]:
+                        st.warning(f"⚠️ AI 复核未完成（已保留上方算法结果）：{ai_res['error']}")
+                        if ai_res.get("raw"):
+                            st.caption("多为该模型未按 JSON 输出、或非视觉模型看不到图。"
+                                       "可换用支持看图、遵循指令更好的模型（如 gpt-4o、glm-4v-plus）。")
+                            with st.expander("查看模型原始返回（用于排查）"):
+                                st.code(str(ai_res["raw"])[:3000])
+                    else:
+                        _render_ai_review(ai_res["data"], pattern_result["regions"],
+                                          base_img=aligned_photo)
 
         except Exception as e:
             st.error(f"❌ 核对过程中出现错误: {str(e)}")

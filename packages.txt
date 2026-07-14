@@ -1,0 +1,4 @@
+libglib2.0-0
+libgl1
+libcairo2
+fonts-noto-cjk

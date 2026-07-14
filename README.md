@@ -28,6 +28,49 @@
 > 物理下限：检测能力始终正比于花纹与底色的对比度。若花纹与底色**完全同色同质**（零对比），
 > 任何被动成像都无信号可用，这不是算法能突破的。
 
+## 🤖 AI 复核（可选 · 自带 API Key / BYOK）
+
+在算法之上叠加一层**视觉大模型语义复核**：算法负责精确定位、圈出候选差异块，
+AI 负责判断每个候选块**是真缺陷还是伪差异**（如光照/曝光的黑↔灰、对齐残留描边、
+反光阴影、条码等），并指出算法可能**漏掉**的差异，最后给出一句总体结论。
+
+- **算法定位，AI 判定**：不让 AI 直接"找不同"（视觉模型不擅长精确像素比对），
+  只让它对算法已圈出的区域做语义裁决，可靠性更高。
+- **批注视图 + 一键下载**：结果以「左图右卡、箭头连线」呈现——候选框按判定着色
+  （红=真缺陷 / 蓝=伪差异 / 橙色虚线=AI 认为被漏掉的），编号与右侧说明一一相连；
+  可「⬇️ 下载复核批注图 (PNG)」整图存档或发工厂。
+  > 下载功能需服务端栅格化：依赖已在 `requirements.txt`(cairosvg) 与
+  > `packages.txt`(libcairo2 / fonts-noto-cjk，后者保证 PNG 中文正常) 中配好。
+- **自带 Key（BYOK）**：在侧栏「🤖 AI 复核」中选择服务商、填入你自己的 API Key 与模型。
+  内置预设：**OpenAI、Anthropic、Gemini、智谱 GLM、Kimi (Moonshot)**；并提供
+  **「自定义 (OpenAI 兼容)」**——填任意 base_url + 视觉模型即可接入 DeepSeek / 通义 /
+  SiliconFlow / OpenRouter / 本地 Ollama 等任何 OpenAI 兼容服务。模型与接口地址都可自由改写。
+  费用由你的 Key 承担。
+  > 注意：AI 复核要看图，务必选**支持视觉/多模态**的模型（如 gpt-4o、glm-4v、
+  > moonshot-*-vision、qwen-vl 等）；纯文本模型无法用。国内厂商的具体模型名请以其官方文档为准。
+- **默认关闭**：不填 Key、不勾选就完全不触发，纯算法流程照常工作。
+- **失败降级**：网络/鉴权/额度异常时自动回退为"仅算法结果"，不中断核对。
+
+### 「自定义 (OpenAI 兼容)」常见服务速查
+
+选「自定义」后填入下面的 base_url 与一个**支持视觉**的模型即可。模型名迭代快，**以各家官方文档为准**：
+
+| 服务 | base_url | 视觉模型示例 |
+|------|----------|--------------|
+| 通义千问（阿里 DashScope） | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-vl-max` / `qwen-vl-plus` |
+| SiliconFlow 硅基流动 | `https://api.siliconflow.cn/v1` | `Qwen/Qwen2.5-VL-72B-Instruct` 等 |
+| OpenRouter（聚合多家） | `https://openrouter.ai/api/v1` | `openai/gpt-4o`、`google/gemini-2.0-flash` 等 |
+| 本地 Ollama | `http://localhost:11434/v1` | `llama3.2-vision`、`qwen2-vl` 等 |
+
+> DeepSeek 官方 API 目前主要是**纯文本**模型，不适合本功能（看不了图）。
+
+### 安全与隐私
+
+- API Key 仅存于**当次会话内存**，不落盘、不写日志、不进 URL；刷新页面即清除。
+- 公开部署（如 Streamlit Cloud，多用户共享同一进程）时，密钥会**经过该服务器**，
+  请自行评估对部署方的信任；对隐私敏感的稿件建议本地运行或不启用 AI 复核。
+- 建议选用便宜的 mini / flash 档视觉模型，验证类任务已足够。
+
 ## 在线体验 / 部署
 
 本项目可直接部署到 **Streamlit Community Cloud**：
@@ -56,6 +99,8 @@ src/                      # 核心算法模块
   ├── image_align.py      # 全局图像对齐（ORB + 透视）
   ├── local_align.py      # 局部弹性对齐（分块配准，压制曲面错位）
   ├── pattern_diff.py     # 纯图像差异检测（主流程）
+  ├── ai_review.py        # AI 语义复核（可选，BYOK）
+  ├── review_render.py    # AI 复核「左图右卡箭头连线」批注视图（SVG）
   ├── text_check.py       # 文字核对（OCR，可选）
   ├── pattern_check.py    # 旧版 SSIM 图案检测（保留兼容）
   └── visualization.py    # 报告与可视化
